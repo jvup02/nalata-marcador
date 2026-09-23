@@ -7,6 +7,6 @@
 // chave do painel, a "service_role", NUNCA entra aqui nem em lugar nenhum
 // deste repositório: essa sim abre a base inteira.
 window.NALATA = {
-  url: "",
-  chave: ""
+  url: "https://mieobgvxqbqppwkwbuex.supabase.co",
+  chave: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pZW9iZ3Z4cWJxcHB3a3didWV4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxODQ3MzcsImV4cCI6MjEwNTc2MDczN30.O9XW09oy5gxVJ0mWIJkZ2_efrpTUFhoGP71cOTtQqSk"
 };
