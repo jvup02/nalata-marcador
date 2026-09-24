@@ -332,7 +332,8 @@
     if (atual) {
       d.rascunhos[atual.jogoId] = {
         game: atual.game, marcacoes: atual.marcacoes,
-        gamesFeitos: atual.gamesFeitos, jogo: atual.jogo
+        gamesFeitos: atual.gamesFeitos, jogo: atual.jogo,
+        abertoEm: atual.abertoEm
       };
     }
     gravarLocal(d);
@@ -356,7 +357,20 @@
       .catch(function (erro) {
         enviando = false;
         // 4xx é pedido malformado: insistir não resolve e trava a fila inteira.
-        if (/^Error: 4\d\d/.test(String(erro))) { fila.shift(); salvarTudo(); }
+        if (/^Error: 4\d\d/.test(String(erro))) {
+          // Menos uma coluna é melhor que menos um game. Se a base ainda não
+          // tem `aberto_em` (ela é nova — ver CLAUDE.md, item 17), o PostgREST
+          // recusa a linha inteira, e o descarte abaixo levaria junto as
+          // marcações daquele game. Tenta de novo sem o campo opcional: o
+          // Studio sabe viver sem ele, recuando um game inteiro na busca.
+          if (op.dados && op.dados.aberto_em !== undefined && !op.semAbertura) {
+            delete op.dados.aberto_em;
+            op.semAbertura = true;
+          } else {
+            fila.shift();
+          }
+          salvarTudo();
+        }
         pintarEstado();
         setTimeout(escoar, 8000);
       });
@@ -388,10 +402,31 @@
   }
 
   // ---------- lista do dia ----------
+
+  // A data de hoje pelo relógio do celular, não em UTC: num jogo das 21h30 o
+  // UTC já virou o dia seguinte, e a lista do dia ficaria vazia justo nos
+  // jogos da noite.
+  function hoje() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0")
+           + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function eDeHoje(j) {
+    // Sem data (jogo criado antes desta versão) conta como de hoje: melhor
+    // aparecer a mais do que sumir um jogo que ele precisa marcar agora.
+    return !j.dia || j.dia === hoje();
+  }
+
   function pintarLista() {
     var rascunhos = lerLocal().rascunhos || {};
-    var abertos = jogos.filter(function (j) { return j.status !== "encerrado"; });
-    var fechados = jogos.filter(function (j) { return j.status === "encerrado"; });
+    var emAberto = jogos.filter(function (j) { return j.status !== "encerrado"; });
+    // Num torneio de cinco dias, o que ele esquecer de encerrar hoje aparece
+    // amanhã no meio dos jogos do dia. Os de outros dias não somem — descem
+    // pra parte de baixo, junto com os encerrados.
+    var abertos = emAberto.filter(eDeHoje);
+    var deOutroDia = emAberto.filter(function (j) { return !eDeHoje(j); });
+    var fechados = jogos.filter(function (j) { return j.status === "encerrado"; }).concat(deOutroDia);
     abertos.sort(function (x, y) { return (x.ordem || 0) - (y.ordem || 0); });
 
     var alvo = $("lista-jogos");
@@ -399,9 +434,11 @@
     if (!abertos.length) {
       var vazio = document.createElement("div");
       vazio.className = "vazio";
-      vazio.textContent = LIGADA
-        ? "Nenhum jogo aberto. Use “Outro jogo” para criar um agora."
-        : "Sem base configurada. Use “Outro jogo” para marcar mesmo assim.";
+      vazio.textContent = !LIGADA
+        ? "Sem base configurada. Use “Outro jogo” para marcar mesmo assim."
+        : deOutroDia.length
+          ? "Nenhum jogo de hoje. Os de outros dias estão logo abaixo."
+          : "Nenhum jogo aberto. Use “Outro jogo” para criar um agora.";
       alvo.appendChild(vazio);
     }
     abertos.forEach(function (j) {
@@ -439,7 +476,9 @@
       var meta = document.createElement("div");
       meta.className = "jogo-meta";
       var s = document.createElement("span");
-      s.textContent = "encerrado — toque para reabrir";
+      s.textContent = j.status === "encerrado"
+        ? "encerrado — toque para reabrir"
+        : "de " + (j.dia || "outro dia") + " — toque para abrir";
       meta.appendChild(s);
       b.appendChild(meta);
       var nomes = document.createElement("div");
@@ -448,10 +487,14 @@
       nomes.textContent = (j.jogador_a || "?") + " × " + (j.jogador_b || "?");
       b.appendChild(nomes);
       b.addEventListener("click", function () {
-        enfileirar({ metodo: "PATCH", recurso: "jogos?id=eq." + encodeURIComponent(j.id),
-                     dados: { status: "aberto" } });
-        j.status = "aberto";
-        pintarLista();
+        if (j.status === "encerrado") {
+          enfileirar({ metodo: "PATCH", recurso: "jogos?id=eq." + encodeURIComponent(j.id),
+                       dados: { status: "aberto" } });
+          j.status = "aberto";
+          pintarLista();
+        } else {
+          abrirJogo(j);   // aberto de outro dia: é só continuar de onde parou
+        }
       });
       alvo2.appendChild(b);
     });
@@ -463,8 +506,14 @@
       jogoId: j.id, jogo: j,
       game: r ? r.game : 1,
       marcacoes: r ? r.marcacoes : [],
-      gamesFeitos: r ? r.gamesFeitos : []
+      gamesFeitos: r ? r.gamesFeitos : [],
+      // A que horas este game começou. É o único horário que diz onde a
+      // partida COMEÇA dentro da live de 5 horas — sem ele o Studio precisa
+      // recuar um game inteiro por segurança (CLAUDE.md, item 17). Retomar um
+      // rascunho mantém o horário de antes; só um game novo zera.
+      abertoEm: (r && r.abertoEm) ? r.abertoEm : new Date().toISOString()
     };
+    salvarTudo();
     $("jogo-titulo").textContent = (j.jogador_a || "?") + " × " + (j.jogador_b || "?");
     $("jogo-legenda").textContent = [j.quadra, j.horario].filter(Boolean).join(" · ") || " ";
     $("nome-a").textContent = j.jogador_a || "Esquerda";
@@ -594,6 +643,28 @@
     window.scrollTo(0, 0);
   }
 
+  // Game de squash vai a 11; empatou em 10-10, vence quem abrir 2 de vantagem
+  // (CLAUDE.md do Studio, item 4). Escolher o vencedor põe 11 do lado dele e
+  // deixa o outro como estava — e o padrão do campo da esquerda já é 11, então
+  // dava pra confirmar um 11 × 11, que não existe. Aqui a página barra.
+  function placarImpossivel(a, b, vencedorIndice) {
+    var ganhou = vencedorIndice === 0 ? a : b;
+    var perdeu = vencedorIndice === 0 ? b : a;
+    var nome = vencedorIndice === 0 ? atual.jogo.jogador_a : atual.jogo.jogador_b;
+    if (ganhou <= perdeu) {
+      return "Você marcou " + a + " × " + b + ", mas disse que quem ganhou foi "
+             + (nome || "esse jogador") + ". Confira os números.";
+    }
+    if (ganhou === 11 && perdeu <= 9) return "";
+    if (ganhou >= 12 && ganhou - perdeu === 2) return "";
+    if (ganhou === 11 && perdeu >= 10) {
+      return "11 × " + perdeu + " não fecha game: passando de 10-10, o game só "
+             + "acaba com 2 de vantagem (12-10, 13-11...).";
+    }
+    return "Placar de " + a + " × " + b + " não fecha um game de squash. "
+           + "O game vai até 11, e depois de 10-10 termina com 2 de vantagem.";
+  }
+
   $("btn-revisar").addEventListener("click", function () {
     var vencedorIndice = -1;
     Array.prototype.forEach.call($("escolha-vencedor").children, function (o, i) {
@@ -604,6 +675,8 @@
       return;
     }
     var a = num($("fim-a").value), b = num($("fim-b").value);
+    var erro = placarImpossivel(a, b, vencedorIndice);
+    if (erro) { alerta($("fim-game-passo1"), erro); return; }
     var caixa = $("resumo-game");
     caixa.innerHTML = "";
     var h = document.createElement("h3");
@@ -648,12 +721,14 @@
         vencedor: registro.vencedor,
         placar_final: registro.placar_final,
         marcacoes: registro.marcacoes,
+        aberto_em: atual.abertoEm || null,
         enviado_em: new Date().toISOString()
       }
     });
 
     atual.game = registro.game + 1;
     atual.marcacoes = [];
+    atual.abertoEm = new Date().toISOString();
     salvarTudo();
     pintarJogo();
     $("placar-a").value = 0;
@@ -717,6 +792,7 @@
       id: "manual_" + Date.now(),
       jogador_a: a, jogador_b: b,
       quadra: $("nova-quadra").value.trim(),
+      dia: hoje(),
       status: "aberto", ordem: 999
     };
     jogos.push(jogo);
