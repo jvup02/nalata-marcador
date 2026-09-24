@@ -42,6 +42,15 @@
     -webkit-text-size-adjust: 100%;
   }
   * { box-sizing: border-box; }
+
+  /* Tocar rápido duas vezes no mesmo lugar amplia a tela no iPhone — e marcar
+     placar é exatamente isso: toque, toque, toque no "+" até chegar em 8. No
+     meio da partida a tela ficava ampliada e o narrador tinha que arrumar com
+     os dedos (João, 24/09/2026). `manipulation` desliga só o zoom de duplo
+     toque; rolar e o zoom de dois dedos continuam funcionando, pra ele ainda
+     poder aproximar se quiser. */
+  * { touch-action: manipulation; }
+
   button, input { font: inherit; color: inherit; }
   button { cursor: pointer; border: none; background: none; }
   [hidden] { display: none !important; }
@@ -103,6 +112,10 @@
            text-align: center; font-variant-numeric: tabular-nums; -moz-appearance: textfield; }
   .caixa::-webkit-outer-spin-button, .caixa::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .caixa:focus { border-color: var(--acento); outline: none; }
+  /* Segurar o dedo num botão não seleciona texto nem abre a lupa do iOS. Os
+     campos de placar ficam de fora de propósito: ele pode querer digitar o
+     número direto em vez de tocar no "+" onze vezes. */
+  .passo, .botao, .jogo, .game-aba { -webkit-user-select: none; user-select: none; }
   .x { font-family: var(--cond); font-size: 30px; color: var(--texto-fraco); padding-top: 44px; }
   .passos { display: flex; gap: 8px; width: 100%; }
   .passo { flex: 1; background: var(--superficie); border: 1px solid var(--linha); border-radius: 10px;
