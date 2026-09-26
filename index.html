@@ -470,6 +470,9 @@
       meta.className = "jogo-meta";
       if (j.horario) { var h = document.createElement("span"); h.textContent = j.horario; meta.appendChild(h); }
       if (j.quadra) { var q = document.createElement("span"); q.className = "quadra"; q.textContent = j.quadra; meta.appendChild(q); }
+      // Feminino ou masculino: num dia de 16 jogos alternando, e o que situa o
+      // Vitor na lista sem ele precisar reconhecer os nomes.
+      if (j.categoria) { var c = document.createElement("span"); c.className = "etiqueta"; c.textContent = j.categoria; meta.appendChild(c); }
       b.appendChild(meta);
       var nomes = document.createElement("div");
       nomes.className = "jogo-nomes";
@@ -547,7 +550,7 @@
     };
     salvarTudo();
     $("jogo-titulo").textContent = (j.jogador_a || "?") + " × " + (j.jogador_b || "?");
-    $("jogo-legenda").textContent = [j.quadra, j.horario].filter(Boolean).join(" · ") || " ";
+    $("jogo-legenda").textContent = [j.quadra, j.horario, j.categoria].filter(Boolean).join(" · ") || " ";
     $("nome-a").textContent = j.jogador_a || "Esquerda";
     $("nome-b").textContent = j.jogador_b || "Direita";
     $("fim-nome-a").textContent = j.jogador_a || "Esquerda";
