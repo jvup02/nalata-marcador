@@ -222,10 +222,8 @@
 
     <section id="tela-game-fim" hidden>
       <h2 class="titulo" id="fim-game-titulo">&nbsp;</h2>
-      <p class="legenda">Confirme como o game terminou.</p>
+      <p class="legenda">Confira o placar. Quem ganhou sai dele.</p>
       <div id="fim-game-passo1">
-        <div class="secao-titulo">Quem ganhou o game</div>
-        <div class="escolha" id="escolha-vencedor"></div>
         <div class="secao-titulo">Placar final do game</div>
         <div class="placar">
           <div class="lado">
@@ -620,6 +618,32 @@
     if (navigator.vibrate) navigator.vibrate(8);
   });
 
+  // O game sobe a cada marcacao, nao so quando o narrador encerra. Ele fica
+  // com `id` fixo (jogo__gN) e vai por merge-duplicates, entao reenviar corrige
+  // a mesma linha em vez de duplicar - e o envio parcial nao apaga o vencedor
+  // nem o placar final que um encerramento ja tenha gravado (conferido contra a
+  // base em 30/09/2026). Assim o Studio enxerga o ponto assim que ele e marcado,
+  // sem depender de alguem lembrar de fechar o game.
+  function subirGameParcial() {
+    if (!atual.jogoId) return;
+    enfileirar({
+      metodo: "POST",
+      recurso: "games",
+      cabecalhos: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+      dados: {
+        id: atual.jogoId + "__g" + atual.game,
+        jogo_id: atual.jogoId,
+        game: atual.game,
+        jogador_a: atual.jogo.jogador_a || "",
+        jogador_b: atual.jogo.jogador_b || "",
+        quadra: atual.jogo.quadra || "",
+        marcacoes: atual.marcacoes.slice(),
+        aberto_em: atual.abertoEm || null,
+        enviado_em: new Date().toISOString()
+      }
+    });
+  }
+
   $("btn-marcar").addEventListener("click", function () {
     atual.marcacoes.push({
       a: num($("placar-a").value), b: num($("placar-b").value),
@@ -628,6 +652,7 @@
     });
     salvarTudo();
     pintarMarcadas();
+    subirGameParcial();
     if (navigator.vibrate) navigator.vibrate([12, 40, 12]);
   });
 
@@ -635,20 +660,10 @@
     $("fim-game-titulo").textContent = atual.game + "º game";
     $("fim-game-passo1").hidden = false;
     $("fim-game-passo2").hidden = true;
-    var escolha = $("escolha-vencedor");
-    escolha.innerHTML = "";
-    [atual.jogo.jogador_a, atual.jogo.jogador_b].forEach(function (nome, i) {
-      var b = document.createElement("button");
-      b.textContent = nome || (i ? "Direita" : "Esquerda");
-      b.setAttribute("aria-pressed", "false");
-      b.addEventListener("click", function () {
-        Array.prototype.forEach.call(escolha.children, function (o) { o.setAttribute("aria-pressed", "false"); });
-        b.setAttribute("aria-pressed", "true");
-        $("fim-a").value = i === 0 ? 11 : num($("fim-a").value);
-        $("fim-b").value = i === 1 ? 11 : num($("fim-b").value);
-      });
-      escolha.appendChild(b);
-    });
+    // O placar final ja vem do que esta na tela: quem narra mantem esses numeros
+    // durante o game pra marcar os pontos, entao perguntar de novo era repetir.
+    $("fim-a").value = num($("placar-a").value);
+    $("fim-b").value = num($("placar-b").value);
     mostrar("tela-game-fim");
   });
 
@@ -682,14 +697,21 @@
   // (CLAUDE.md do Studio, item 4). Escolher o vencedor põe 11 do lado dele e
   // deixa o outro como estava — e o padrão do campo da esquerda já é 11, então
   // dava pra confirmar um 11 × 11, que não existe. Aqui a página barra.
+  // Quem ganhou sai do proprio placar: no squash o game vai pra quem tem mais
+  // pontos, entao perguntar era pedir duas vezes a mesma informacao.
+  // Devolve -1 quando o placar nao aponta vencedor nenhum (empate).
+  function vencedorDoPlacar(a, b) {
+    if (a === b) return -1;
+    return a > b ? 0 : 1;
+  }
+
   function placarImpossivel(a, b, vencedorIndice) {
+    if (vencedorIndice < 0) {
+      return "O game terminou " + a + " × " + b + " — empate não fecha game. "
+             + "Confira os números.";
+    }
     var ganhou = vencedorIndice === 0 ? a : b;
     var perdeu = vencedorIndice === 0 ? b : a;
-    var nome = vencedorIndice === 0 ? atual.jogo.jogador_a : atual.jogo.jogador_b;
-    if (ganhou <= perdeu) {
-      return "Você marcou " + a + " × " + b + ", mas disse que quem ganhou foi "
-             + (nome || "esse jogador") + ". Confira os números.";
-    }
     if (ganhou === 11 && perdeu <= 9) return "";
     if (ganhou >= 12 && ganhou - perdeu === 2) return "";
     if (ganhou === 11 && perdeu >= 10) {
@@ -701,15 +723,8 @@
   }
 
   $("btn-revisar").addEventListener("click", function () {
-    var vencedorIndice = -1;
-    Array.prototype.forEach.call($("escolha-vencedor").children, function (o, i) {
-      if (o.getAttribute("aria-pressed") === "true") vencedorIndice = i;
-    });
-    if (vencedorIndice < 0) {
-      alerta($("fim-game-passo1"), "Escolha quem ganhou o game antes de revisar.");
-      return;
-    }
     var a = num($("fim-a").value), b = num($("fim-b").value);
+    var vencedorIndice = vencedorDoPlacar(a, b);
     var erro = placarImpossivel(a, b, vencedorIndice);
     if (erro) { alerta($("fim-game-passo1"), erro); return; }
     var caixa = $("resumo-game");
