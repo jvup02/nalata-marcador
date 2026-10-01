@@ -314,6 +314,11 @@
   var fila = [];
   var enviando = false;
   var atual = null;
+  // Como foi a conversa com a base: "esperando" ate a primeira resposta, e
+  // depois "ok" ou "falhou". Sem isso a tela afirmava "Nenhum jogo aberto"
+  // enquanto a lista ainda estava vindo — e num wifi de ginasio lento isso
+  // dura segundos, tempo de o narrador criar um jogo na mao sem precisar.
+  var leituraDaBase = "esperando";
 
   // ---------- conversa com a base ----------
   function api(recurso, opcoes) {
@@ -337,13 +342,20 @@
   }
 
   function carregarJogos() {
-    if (!LIGADA) return Promise.resolve();
+    if (!LIGADA) { leituraDaBase = "falhou"; return Promise.resolve(); }
     return api("jogos?select=*&order=ordem").then(function (r) { return r.json(); })
       .then(function (linhas) {
         jogos = linhas || [];
+        leituraDaBase = "ok";
         if (!atual) pintarLista();
         pintarEstado();
-      }).catch(function () { pintarEstado(); });
+      }).catch(function () {
+        leituraDaBase = "falhou";
+        // Repinta tambem na falha: a tela precisa parar de dizer "carregando"
+        // e contar o que houve, em vez de ficar esperando pra sempre.
+        if (!atual) pintarLista();
+        pintarEstado();
+      });
   }
 
   // ---------- guarda local ----------
@@ -414,6 +426,12 @@
       texto.textContent = fila.length === 1 ? "1 esperando" : fila.length + " esperando";
       return;
     }
+    if (leituraDaBase === "falhou") {
+      // Nada na fila, mas a base nao respondeu: "tudo enviado" ali daria a
+      // entender que esta tudo certo com a conexao, e nao esta.
+      texto.textContent = "sem conexão";
+      return;
+    }
     bolinha.classList.add("ligada");
     texto.textContent = "tudo enviado";
   }
@@ -471,9 +489,13 @@
       vazio.className = "vazio";
       vazio.textContent = !LIGADA
         ? "Sem base configurada. Use “Outro jogo” para marcar mesmo assim."
-        : deOutroDia.length
-          ? "Nenhum jogo de hoje. Os de outros dias estão logo abaixo."
-          : "Nenhum jogo aberto. Use “Outro jogo” para criar um agora.";
+        : leituraDaBase === "esperando"
+          ? "Carregando os jogos do dia…"
+          : leituraDaBase === "falhou"
+            ? "Não consegui falar com a base agora. Se precisar começar já, use “Outro jogo” — o que você marcar sobe sozinho quando a internet voltar."
+            : deOutroDia.length
+              ? "Nenhum jogo de hoje. Os de outros dias estão logo abaixo."
+              : "Nenhum jogo aberto. Use “Outro jogo” para criar um agora.";
       alvo.appendChild(vazio);
     }
     abertos.forEach(function (j) {
