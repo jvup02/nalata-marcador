@@ -533,6 +533,20 @@
     }
   }
 
+  // De qual campeonato é este jogo criado na mão. Primeiro procura entre os
+  // jogos de hoje — se o João cadastrou a lista do dia, é dali. Não havendo,
+  // herda do dia mais recente que tenha campeonato, que cobre o caso de a
+  // ordem mudar antes de qualquer jogo do dia ter sido aberto. Sem nada, vai
+  // sem campeonato mesmo: melhor vazio que errado.
+  function torneioDeHoje() {
+    var deHoje = jogos.filter(function (j) { return eDeHoje(j) && j.torneio; });
+    if (deHoje.length) return deHoje[0].torneio;
+    var comTorneio = jogos.filter(function (j) { return j.torneio && j.dia; });
+    if (!comTorneio.length) return "";
+    comTorneio.sort(function (x, y) { return x.dia < y.dia ? 1 : -1; });
+    return comTorneio[0].torneio;
+  }
+
   function abrirJogo(j) {
     var r = (lerLocal().rascunhos || {})[j.id];
     atual = {
@@ -843,8 +857,10 @@
       jogador_a: a, jogador_b: b,
       quadra: $("nova-quadra").value.trim(),
       dia: hoje(),
+      torneio: torneioDeHoje(),
       status: "aberto", ordem: 999
     };
+    if (!jogo.torneio) delete jogo.torneio;
     jogos.push(jogo);
     enfileirar({ metodo: "POST", recurso: "jogos",
                  cabecalhos: { "Prefer": "resolution=merge-duplicates,return=minimal" },
