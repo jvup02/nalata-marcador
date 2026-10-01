@@ -222,8 +222,15 @@
 
     <section id="tela-game-fim" hidden>
       <h2 class="titulo" id="fim-game-titulo">&nbsp;</h2>
-      <p class="legenda">Confira o placar. Quem ganhou sai dele.</p>
+      <p class="legenda" id="fim-game-legenda">Toque em quem ganhou. O placar é opcional.</p>
       <div id="fim-game-passo1">
+        <div class="escolha" id="fim-escolha">
+          <button type="button" id="fim-venceu-a" aria-pressed="false">&nbsp;</button>
+          <button type="button" id="fim-venceu-b" aria-pressed="false">&nbsp;</button>
+        </div>
+        <p class="dica" id="fim-dica-placar">Um toque e o game sobe.</p>
+        <button class="botao calmo" id="btn-abrir-placar">Anotar o placar final</button>
+        <div id="fim-placar" hidden>
         <div class="secao-titulo">Placar final do game</div>
         <div class="placar">
           <div class="lado">
@@ -245,12 +252,16 @@
           </div>
         </div>
         <div class="acoes">
-          <button class="botao" id="btn-revisar">Revisar</button>
+          <button class="botao" id="btn-revisar">Usar este placar</button>
+        </div>
+        </div>
+        <div class="acoes">
           <button class="botao calmo" id="btn-voltar-game">Voltar e marcar mais</button>
         </div>
       </div>
       <div id="fim-game-passo2" hidden>
         <div class="resumo" id="resumo-game"></div>
+        <p class="dica" id="nota-resumo">&nbsp;</p>
         <div class="acoes">
           <button class="botao" id="btn-enviar-game">Confirmar e enviar</button>
           <button class="botao calmo" id="btn-corrigir-game">Voltar e corrigir</button>
@@ -261,6 +272,12 @@
     <section id="tela-duelo-fim" hidden>
       <h2 class="titulo">Encerrar duelo</h2>
       <p class="legenda">Depois disso o duelo sai da lista do dia.</p>
+      <div class="secao-titulo">Quem ganhou a partida?</div>
+      <div class="escolha" id="duelo-escolha">
+        <button type="button" id="duelo-venceu-a" aria-pressed="false">&nbsp;</button>
+        <button type="button" id="duelo-venceu-b" aria-pressed="false">&nbsp;</button>
+      </div>
+      <p class="dica" id="duelo-dica">&nbsp;</p>
       <div class="resumo" id="resumo-duelo"></div>
       <div class="acoes">
         <button class="botao" id="btn-enviar-duelo">Confirmar e encerrar</button>
@@ -584,7 +601,20 @@
         b.textContent = n + "º game";
         b.setAttribute("aria-current", n === atual.game ? "true" : "false");
         b.addEventListener("click", function () {
-          if (feito) return;
+          if (feito || n === atual.game) return;
+          // Um toque sem querer na aba limpava a lista do game em andamento, em
+          // silencio. As jogadas ja estao na base, mas sumiam da tela e do
+          // resumo de fim de game — onde ele confere o que marcou.
+          if (atual.marcacoes.length && !window.confirm(
+                "Tem " + atual.marcacoes.length + " jogada(s) marcada(s) no "
+                + atual.game + "º game. Ir para o " + n + "º game limpa essa lista. Continuar?")) {
+            return;
+          }
+          // Avancar pela aba comeca um game agora; voltar pra um game anterior
+          // mantem o horario antigo. A conta do Studio tem que errar sempre pra
+          // fora: horario velho faz baixar um pedaco a mais, horario novo demais
+          // deixaria o game inteiro fora da janela.
+          if (n > atual.game) atual.abertoEm = new Date().toISOString();
           atual.game = n;
           atual.marcacoes = [];
           salvarTudo();
@@ -613,6 +643,10 @@
         atual.marcacoes.splice(i, 1);
         salvarTudo();
         pintarMarcadas();
+        // A jogada ja tinha subido (o game sobe a cada marcacao): sem reenviar,
+        // ela sumia do celular e continuava na base, e o Studio marcava no
+        // video um ponto que o narrador ja tinha desmarcado.
+        subirGameParcial();
       });
       c.appendChild(x);
       chips.appendChild(c);
@@ -670,21 +704,71 @@
     if (navigator.vibrate) navigator.vibrate([12, 40, 12]);
   });
 
+  // ---------- fim de game: um toque em quem ganhou basta ----------
+  // O que o Studio precisa de verdade sao os horarios (que a pagina grava
+  // sozinha) e as marcacoes. Quem ganhou o game e a conferencia que impede
+  // marcacao cair no game errado; o placar final e uma conferencia mais fina,
+  // boa de ter, mas nao vale travar quem esta narrando (Joao, 01/10/2026).
+  // Antes era obrigatorio acertar os numeros ate fecharem um game de squash.
+  function nomeDoLado(indice) {
+    return (indice === 0 ? atual.jogo.jogador_a : atual.jogo.jogador_b) || "?";
+  }
+
+  // O placar que fica na tela e o do ponto EM DISPUTA (item 17): quando o game
+  // fecha, quem ganhou somou 1 nele. Se essa conta fechar um game de squash, o
+  // placar final sai de graca, sem ninguem digitar. Se nao fechar (ele parou de
+  // atualizar no meio), vai so o vencedor — e o Studio sabe conferir por ele.
+  function placarQueFechou(vencedorIndice) {
+    var a = num($("placar-a").value), b = num($("placar-b").value);
+    if (vencedorIndice === 0) a += 1; else b += 1;
+    if (placarImpossivel(a, b, vencedorIndice)) return null;
+    return { a: a, b: b };
+  }
+
+  function pintarEscolhaGame(indice) {
+    $("fim-venceu-a").setAttribute("aria-pressed", String(indice === 0));
+    $("fim-venceu-b").setAttribute("aria-pressed", String(indice === 1));
+  }
+
   $("btn-fim-game").addEventListener("click", function () {
     $("fim-game-titulo").textContent = atual.game + "º game";
     $("fim-game-passo1").hidden = false;
     $("fim-game-passo2").hidden = true;
-    // O placar final ja vem do que esta na tela: quem narra mantem esses numeros
-    // durante o game pra marcar os pontos, entao perguntar de novo era repetir.
+    $("fim-game-legenda").textContent = "Toque em quem ganhou. O placar é opcional.";
+    $("fim-placar").hidden = true;
+    $("btn-abrir-placar").hidden = false;
+    $("fim-dica-placar").hidden = false;
+    pintarEscolhaGame(-1);
+    $("fim-venceu-a").textContent = nomeDoLado(0);
+    $("fim-venceu-b").textContent = nomeDoLado(1);
+    $("fim-nome-a").textContent = nomeDoLado(0);
+    $("fim-nome-b").textContent = nomeDoLado(1);
+    // Quando ele abre o placar, os campos ja vem do que esta na tela: quem narra
+    // mantem esses numeros durante o game pra marcar os pontos.
     $("fim-a").value = num($("placar-a").value);
     $("fim-b").value = num($("placar-b").value);
     mostrar("tela-game-fim");
+  });
+
+  [0, 1].forEach(function (indice) {
+    $(indice === 0 ? "fim-venceu-a" : "fim-venceu-b").addEventListener("click", function () {
+      pintarEscolhaGame(indice);
+      var placar = placarQueFechou(indice);
+      mostrarResumoGame(indice, placar, !!placar);
+    });
+  });
+
+  $("btn-abrir-placar").addEventListener("click", function () {
+    $("fim-placar").hidden = false;
+    $("btn-abrir-placar").hidden = true;
+    $("fim-dica-placar").hidden = true;
   });
 
   $("btn-voltar-game").addEventListener("click", function () { mostrar("tela-jogo"); });
   $("btn-corrigir-game").addEventListener("click", function () {
     $("fim-game-passo1").hidden = false;
     $("fim-game-passo2").hidden = true;
+    $("fim-game-legenda").textContent = "Toque em quem ganhou. O placar é opcional.";
   });
 
   function linha(pai, rotulo, valor, destacar) {
@@ -736,58 +820,84 @@
            + "O game vai até 11, e depois de 10-10 termina com 2 de vantagem.";
   }
 
-  $("btn-revisar").addEventListener("click", function () {
-    var a = num($("fim-a").value), b = num($("fim-b").value);
-    var vencedorIndice = vencedorDoPlacar(a, b);
-    var erro = placarImpossivel(a, b, vencedorIndice);
-    if (erro) { alerta($("fim-game-passo1"), erro); return; }
+  // A segunda tela mostra o que ele marcou — e e olhando ela que ele lembra do
+  // ponto esquecido. Por isso continua existindo mesmo com um toque so.
+  function mostrarResumoGame(vencedorIndice, placar, deduzido) {
     var caixa = $("resumo-game");
     caixa.innerHTML = "";
     var h = document.createElement("h3");
     h.textContent = atual.game + "º game";
     caixa.appendChild(h);
-    linha(caixa, "Ganhou", vencedorIndice === 0 ? atual.jogo.jogador_a : atual.jogo.jogador_b, true);
-    linha(caixa, "Placar final", a + " × " + b, false);
+    linha(caixa, "Ganhou", nomeDoLado(vencedorIndice), true);
+    linha(caixa, "Placar final", placar ? placar.a + " × " + placar.b : "não anotado", false);
     linha(caixa, atual.marcacoes.length === 1 ? "1 jogada marcada" : atual.marcacoes.length + " jogadas marcadas",
       atual.marcacoes.length ? atual.marcacoes.map(function (m) { return m.a + "×" + m.b; }).join("   ") : "nenhuma", false);
     caixa.dataset.vencedor = String(vencedorIndice);
-    caixa.dataset.a = String(a);
-    caixa.dataset.b = String(b);
+    caixa.dataset.a = placar ? String(placar.a) : "";
+    caixa.dataset.b = placar ? String(placar.b) : "";
+    // Nada sai calado: ele ve de onde veio o placar, ou que vai sem ele.
+    $("nota-resumo").textContent = placar
+      ? (deduzido ? "O placar saiu do que estava na tela, somando o ponto que fechou o game."
+                  : "Placar anotado por você.")
+      : "Vai sem placar final — o Studio confere o game por quem ganhou.";
+    $("fim-game-legenda").textContent = "Confira as jogadas antes de enviar.";
+    // Um aviso de placar impossivel que ele ja resolveu nao pode ficar
+    // esperando no passo 1 pra assustar na proxima vez que ele voltar.
+    var velho = $("fim-game-passo1").querySelector(".aviso");
+    if (velho) velho.remove();
     $("fim-game-passo1").hidden = true;
     $("fim-game-passo2").hidden = false;
     window.scrollTo(0, 0);
+  }
+
+  $("btn-revisar").addEventListener("click", function () {
+    var a = num($("fim-a").value), b = num($("fim-b").value);
+    var vencedorIndice = vencedorDoPlacar(a, b);
+    var erro = placarImpossivel(a, b, vencedorIndice);
+    if (erro) { alerta($("fim-game-passo1"), erro); return; }
+    pintarEscolhaGame(vencedorIndice);
+    mostrarResumoGame(vencedorIndice, { a: a, b: b }, false);
   });
 
   $("btn-enviar-game").addEventListener("click", function () {
     var caixa = $("resumo-game");
     var vi = parseInt(caixa.dataset.vencedor, 10);
+    var temPlacar = caixa.dataset.a !== "";
     var registro = {
       game: atual.game,
-      vencedor: vi === 0 ? atual.jogo.jogador_a : atual.jogo.jogador_b,
-      placar_final: { a: parseInt(caixa.dataset.a, 10), b: parseInt(caixa.dataset.b, 10) },
+      vencedor: nomeDoLado(vi),
+      placar_final: temPlacar
+        ? { a: parseInt(caixa.dataset.a, 10), b: parseInt(caixa.dataset.b, 10) }
+        : null,
       marcacoes: atual.marcacoes.slice()
     };
     atual.gamesFeitos = atual.gamesFeitos.filter(function (g) { return g.game !== registro.game; });
     atual.gamesFeitos.push(registro);
+
+    var dados = {
+      id: atual.jogoId + "__g" + registro.game,
+      jogo_id: atual.jogoId,
+      game: registro.game,
+      jogador_a: atual.jogo.jogador_a || "",
+      jogador_b: atual.jogo.jogador_b || "",
+      quadra: atual.jogo.quadra || "",
+      vencedor: registro.vencedor,
+      placar_final: registro.placar_final,
+      marcacoes: registro.marcacoes,
+      aberto_em: atual.abertoEm || null,
+      enviado_em: new Date().toISOString()
+    };
+    // Sem placar anotado o campo nem vai: o upsert so mexe nas colunas que
+    // chegam, entao reencerrar um game sem anotar nao apaga o placar que um
+    // encerramento anterior ja tinha gravado.
+    if (!temPlacar) delete dados.placar_final;
 
     enfileirar({
       metodo: "POST",
       recurso: "games",
       // merge-duplicates: reenviar o mesmo game corrige em vez de duplicar.
       cabecalhos: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-      dados: {
-        id: atual.jogoId + "__g" + registro.game,
-        jogo_id: atual.jogoId,
-        game: registro.game,
-        jogador_a: atual.jogo.jogador_a || "",
-        jogador_b: atual.jogo.jogador_b || "",
-        quadra: atual.jogo.quadra || "",
-        vencedor: registro.vencedor,
-        placar_final: registro.placar_final,
-        marcacoes: registro.marcacoes,
-        aberto_em: atual.abertoEm || null,
-        enviado_em: new Date().toISOString()
-      }
+      dados: dados
     });
 
     atual.game = registro.game + 1;
@@ -800,6 +910,23 @@
     mostrar("tela-jogo");
   });
 
+  // Quem ganhou a partida tambem e um toque. Vem pre-escolhido pelos games que
+  // ele enviou, e da pra trocar: WO, desistencia e duelo encerrado no meio nao
+  // tem games pra somar, e antes disso o encerramento saia 0 × 0, sem vencedor.
+  var dueloVencedor = null;
+
+  function pintarEscolhaDuelo() {
+    $("duelo-venceu-a").setAttribute("aria-pressed", String(dueloVencedor === 0));
+    $("duelo-venceu-b").setAttribute("aria-pressed", String(dueloVencedor === 1));
+  }
+
+  [0, 1].forEach(function (indice) {
+    $(indice === 0 ? "duelo-venceu-a" : "duelo-venceu-b").addEventListener("click", function () {
+      dueloVencedor = indice;
+      pintarEscolhaDuelo();
+    });
+  });
+
   $("btn-fim-duelo").addEventListener("click", function () {
     var caixa = $("resumo-duelo");
     caixa.innerHTML = "";
@@ -810,8 +937,10 @@
     atual.gamesFeitos.sort(function (x, y) { return x.game - y.game; }).forEach(function (g) {
       if (g.vencedor === atual.jogo.jogador_a) placarGames[0]++; else placarGames[1]++;
       marcadas += g.marcacoes.length;
-      linha(caixa, g.game + "º game · " + g.vencedor,
-        g.placar_final.a + " × " + g.placar_final.b + "  (" + g.marcacoes.length + ")", false);
+      var placar = g.placar_final
+        ? g.placar_final.a + " × " + g.placar_final.b + "  (" + g.marcacoes.length + ")"
+        : "sem placar  (" + g.marcacoes.length + ")";
+      linha(caixa, g.game + "º game · " + g.vencedor, placar, false);
     });
     if (!atual.gamesFeitos.length) linha(caixa, "Nenhum game enviado", "—", false);
     linha(caixa, "Games", placarGames[0] + " × " + placarGames[1], true);
@@ -821,6 +950,14 @@
         "º game que ainda não foram enviadas. Encerre o game antes, ou elas se perdem.");
     }
     caixa.dataset.games = placarGames.join(",");
+
+    $("duelo-venceu-a").textContent = atual.jogo.jogador_a || "?";
+    $("duelo-venceu-b").textContent = atual.jogo.jogador_b || "?";
+    dueloVencedor = placarGames[0] === placarGames[1] ? null : (placarGames[0] > placarGames[1] ? 0 : 1);
+    pintarEscolhaDuelo();
+    $("duelo-dica").textContent = dueloVencedor === null
+      ? "Toque em quem ganhou."
+      : "Pelos games enviados, " + nomeDoLado(dueloVencedor) + " ganhou. Troque se não foi isso.";
     mostrar("tela-duelo-fim");
   });
 
@@ -828,15 +965,21 @@
 
   $("btn-enviar-duelo").addEventListener("click", function () {
     var g = ($("resumo-duelo").dataset.games || "0,0").split(",");
+    // O vencedor do duelo vai dentro de `placar_games`, que ja e um campo livre
+    // na base: coluna nova seria recusada pelo PostgREST enquanto ninguem a
+    // criasse, e o encerramento sumiria junto (ver a fila, mais acima).
+    var placarGames = { a: parseInt(g[0], 10) || 0, b: parseInt(g[1], 10) || 0 };
+    if (dueloVencedor !== null) placarGames.vencedor = nomeDoLado(dueloVencedor);
     enfileirar({
       metodo: "PATCH",
       recurso: "jogos?id=eq." + encodeURIComponent(atual.jogoId),
       dados: {
         status: "encerrado",
         encerrado_em: new Date().toISOString(),
-        placar_games: { a: parseInt(g[0], 10) || 0, b: parseInt(g[1], 10) || 0 }
+        placar_games: placarGames
       }
     });
+    dueloVencedor = null;
     var d = lerLocal();
     if (d.rascunhos) delete d.rascunhos[atual.jogoId];
     gravarLocal(d);
