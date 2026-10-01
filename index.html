@@ -310,6 +310,10 @@
   var BASE = window.NALATA || {};
   var LIGADA = !!(BASE.url && BASE.chave);
 
+  // Colunas que a base pode ainda não ter. A fila tira uma por vez quando o
+  // PostgREST recusa a linha, em vez de perder o game inteiro.
+  var CAMPOS_OPCIONAIS = ["comecou_em", "aberto_em"];
+
   var jogos = [];
   var fila = [];
   var enviando = false;
@@ -373,7 +377,7 @@
       d.rascunhos[atual.jogoId] = {
         game: atual.game, marcacoes: atual.marcacoes,
         gamesFeitos: atual.gamesFeitos, jogo: atual.jogo,
-        abertoEm: atual.abertoEm
+        abertoEm: atual.abertoEm, comecouEm: atual.comecouEm
       };
     }
     gravarLocal(d);
@@ -398,17 +402,24 @@
         enviando = false;
         // 4xx é pedido malformado: insistir não resolve e trava a fila inteira.
         if (/^Error: 4\d\d/.test(String(erro))) {
-          // Menos uma coluna é melhor que menos um game. Se a base ainda não
-          // tem `aberto_em` (ela é nova — ver CLAUDE.md, item 17), o PostgREST
+          // Menos uma coluna é melhor que menos um game. Quando a base ainda
+          // não tem uma coluna nova (`aberto_em`, `comecou_em`), o PostgREST
           // recusa a linha inteira, e o descarte abaixo levaria junto as
-          // marcações daquele game. Tenta de novo sem o campo opcional: o
-          // Studio sabe viver sem ele, recuando um game inteiro na busca.
-          if (op.dados && op.dados.aberto_em !== undefined && !op.semAbertura) {
-            delete op.dados.aberto_em;
-            op.semAbertura = true;
-          } else {
-            fila.shift();
+          // marcações daquele game. Tenta de novo sem o campo opcional, um por
+          // vez: o Studio sabe viver sem qualquer um deles.
+          var tirou = false;
+          op.semEstes = op.semEstes || [];
+          for (var i = 0; i < CAMPOS_OPCIONAIS.length; i++) {
+            var campo = CAMPOS_OPCIONAIS[i];
+            if (op.dados && op.dados[campo] !== undefined
+                && op.semEstes.indexOf(campo) < 0) {
+              delete op.dados[campo];
+              op.semEstes.push(campo);
+              tirou = true;
+              break;
+            }
           }
+          if (!tirou) fila.shift();
           salvarTudo();
         }
         pintarEstado();
@@ -597,7 +608,14 @@
       // partida COMEÇA dentro da live de 5 horas — sem ele o Studio precisa
       // recuar um game inteiro por segurança (CLAUDE.md, item 17). Retomar um
       // rascunho mantém o horário de antes; só um game novo zera.
-      abertoEm: (r && r.abertoEm) ? r.abertoEm : new Date().toISOString()
+      abertoEm: (r && r.abertoEm) ? r.abertoEm : new Date().toISOString(),
+      // Quando a bola começou a rolar de verdade — ver `jogoComecou()`.
+      // Rascunho que já tem jogada marcada e nenhum começo gravado é de um
+      // game que estava rolando quando esta versão entrou no ar: ali o começo
+      // vale como a abertura, pra janela do Studio não cortar nada de um game
+      // que ele já estava narrando.
+      comecouEm: (r && r.comecouEm) ? r.comecouEm
+                 : (r && r.marcacoes && r.marcacoes.length ? r.abertoEm : null)
     };
     salvarTudo();
     $("jogo-titulo").textContent = (j.jogador_a || "?") + " × " + (j.jogador_b || "?");
@@ -639,6 +657,7 @@
           if (n > atual.game) atual.abertoEm = new Date().toISOString();
           atual.game = n;
           atual.marcacoes = [];
+          atual.comecouEm = null;
           salvarTudo();
           pintarJogo();
         });
@@ -675,6 +694,24 @@
     });
   }
 
+  // Quando a bola comecou a rolar, sem ninguem precisar avisar.
+  //
+  // `aberto_em` diz quando o narrador abriu a tela do duelo — e ele abre antes,
+  // esperando a partida anterior acabar. Medido na base em 01/10/2026: um game
+  // ficou 46 min entre abrir e encerrar, com a primeira jogada marcada 25 min
+  // depois de abrir; a mediana dos 15 games e 11,5 min. Ao vivo cada minuto a
+  // mais na janela custa um minuto de download, entao essa espera e cara.
+  //
+  // O primeiro toque no placar resolve de graca: quem narra acompanha o
+  // marcador da TV, entao esse toque acontece no primeiro ou segundo ponto. O
+  // Studio recua uns minutos dali e corta a espera inteira. Nada e perguntado
+  // a ele, e se o toque nunca vier o app volta ao comportamento de antes.
+  function jogoComecou() {
+    if (!atual || atual.comecouEm) return;
+    atual.comecouEm = new Date().toISOString();
+    salvarTudo();
+  }
+
   document.addEventListener("click", function (ev) {
     var alvo = ev.target.closest ? ev.target.closest("[data-passo]") : null;
     if (!alvo) return;
@@ -685,7 +722,15 @@
     var campo = $(campos[qual]);
     if (!campo) return;
     campo.value = num(num(campo.value) + delta);
+    // Só o placar do game em disputa conta; os campos do fim de game (fa/fb)
+    // são preenchidos depois que tudo acabou.
+    if (qual === "a" || qual === "b") jogoComecou();
     if (navigator.vibrate) navigator.vibrate(8);
+  });
+
+  // Digitar o número direto na caixa vale o mesmo que tocar no "+".
+  ["placar-a", "placar-b"].forEach(function (id) {
+    $(id).addEventListener("input", jogoComecou);
   });
 
   // O game sobe a cada marcacao, nao so quando o narrador encerra. Ele fica
@@ -709,12 +754,14 @@
         quadra: atual.jogo.quadra || "",
         marcacoes: atual.marcacoes.slice(),
         aberto_em: atual.abertoEm || null,
+        comecou_em: atual.comecouEm || null,
         enviado_em: new Date().toISOString()
       }
     });
   }
 
   $("btn-marcar").addEventListener("click", function () {
+    jogoComecou();   // marcou uma jogada: a partida está rolando, obviamente
     atual.marcacoes.push({
       a: num($("placar-a").value), b: num($("placar-b").value),
       nome_a: atual.jogo.jogador_a || "", nome_b: atual.jogo.jogador_b || "",
@@ -907,6 +954,7 @@
       placar_final: registro.placar_final,
       marcacoes: registro.marcacoes,
       aberto_em: atual.abertoEm || null,
+      comecou_em: atual.comecouEm || null,
       enviado_em: new Date().toISOString()
     };
     // Sem placar anotado o campo nem vai: o upsert so mexe nas colunas que
@@ -925,6 +973,7 @@
     atual.game = registro.game + 1;
     atual.marcacoes = [];
     atual.abertoEm = new Date().toISOString();
+    atual.comecouEm = null;
     salvarTudo();
     pintarJogo();
     $("placar-a").value = 0;
